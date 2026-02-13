@@ -18,19 +18,17 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import google.generativeai as genai
 
-# Load environment variables from .env file if it exists
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass  # python-dotenv not installed, skip
-
 # ---------------- PAGE CONFIG (must be first Streamlit call) ----------------
 st.set_page_config(page_title="Multigrade AI Teaching Assistant", layout="wide", page_icon="🎓")
 
 # ---------------- CONFIGURATION ----------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-2.5-pro"
+# Try to get API key from secrets first, then environment variables
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except:
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+GEMINI_MODEL = "gemini-2.0-flash-exp"
 MAX_TOKENS = 2048
 TEMPERATURE = 0.7
 
@@ -60,17 +58,15 @@ class TeachingContext:
 @st.cache_resource
 def init_gemini():
     if not GEMINI_API_KEY:
-        st.error("❌ GEMINI_API_KEY environment variable not set.")
-        st.info("Please set your Gemini API key using one of these methods:")
+        st.error("❌ GEMINI_API_KEY not configured.")
+        st.info("Please configure your Gemini API key in Streamlit secrets:")
         st.code("""
-# Option 1: Environment variable (recommended)
-export GEMINI_API_KEY="your_api_key_here"
+# In .streamlit/secrets.toml (local development):
+GEMINI_API_KEY = "your_api_key_here"
 
-# Option 2: Windows Command Prompt
-set GEMINI_API_KEY=your_api_key_here
-
-# Option 3: Add to .env file
-GEMINI_API_KEY=your_api_key_here
+# In Streamlit Cloud:
+# Go to App Settings > Secrets and add:
+# GEMINI_API_KEY = "your_api_key_here"
         """)
         st.info("💡 Get your API key from: https://makersuite.google.com/app/apikey")
         return False
@@ -89,7 +85,7 @@ GEMINI_API_KEY=your_api_key_here
             st.info("Please check your API key and generate a new one if needed:")
             st.info("🔗 https://makersuite.google.com/app/apikey")
         elif "quota" in error_msg.lower():
-            st.error("✅ Ready to generate")
+            st.warning("⚠️ API quota exceeded. Please check your usage limits.")
         else:
             st.error(f"❌ Gemini API initialization failed: {e}")
         return False
@@ -97,41 +93,85 @@ GEMINI_API_KEY=your_api_key_here
 # ---------------- FIREBASE SETUP ----------------
 @st.cache_resource
 def init_firebase():
+    """Initialize Firebase using Streamlit secrets"""
     if not firebase_admin._apps:
         try:
-            config_paths = [
-                "firebase_config.json",
-                "./firebase_config.json",
-                "config/firebase_config.json",
-                "../firebase_config.json"
-            ]
-            cred = None
-            for path in config_paths:
-                try:
-                    if os.path.exists(path):
-                        cred = credentials.Certificate(path)
-                        st.success(f"✅ Found Firebase config at: {path}")
-                        break
-                except Exception:
-                    continue
-            if not cred:
-                st.error("❌ Firebase config file not found. Please ensure 'firebase_config.json' exists in your project directory.")
-                return None
+            # Try to get Firebase config from Streamlit secrets
+            if "firebase" in st.secrets:
+                # Firebase config is in secrets
+                firebase_config = dict(st.secrets["firebase"])
+                cred = credentials.Certificate(firebase_config)
+                st.success("✅ Firebase credentials loaded from Streamlit secrets")
+            else:
+                # Fallback to local file
+                config_paths = [
+                    "firebase_config.json",
+                    "./firebase_config.json",
+                    "config/firebase_config.json",
+                    "../firebase_config.json"
+                ]
+                cred = None
+                for path in config_paths:
+                    try:
+                        if os.path.exists(path):
+                            cred = credentials.Certificate(path)
+                            st.success(f"✅ Found Firebase config at: {path}")
+                            break
+                    except Exception:
+                        continue
+                
+                if not cred:
+                    st.error("❌ Firebase config not found.")
+                    st.info("""
+                    Please configure Firebase credentials in one of these ways:
+                    
+                    **Option 1 - Streamlit Secrets (Recommended for deployment):**
+                    Add to `.streamlit/secrets.toml`:
+                    ```toml
+                    [firebase]
+                    type = "service_account"
+                    project_id = "your-project-id"
+                    private_key_id = "your-private-key-id"
+                    private_key = "-----BEGIN PRIVATE KEY-----\\nYour-Private-Key\\n-----END PRIVATE KEY-----\\n"
+                    client_email = "your-service-account@your-project.iam.gserviceaccount.com"
+                    client_id = "your-client-id"
+                    auth_uri = "https://accounts.google.com/o/oauth2/auth"
+                    token_uri = "https://oauth2.googleapis.com/token"
+                    auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+                    client_x509_cert_url = "your-cert-url"
+                    ```
+                    
+                    **Option 2 - Local JSON file:**
+                    Place `firebase_config.json` in your project directory
+                    """)
+                    return None
+            
             firebase_admin.initialize_app(cred)
             db = firestore.client()
+            
+            # Test the connection
             test_collection = db.collection("multigrade_content").limit(1).get()
             st.success("✅ Successfully connected to Firestore!")
             return db
+            
         except Exception as e:
             st.error(f"❌ Firebase initialization failed: {e}")
             st.error("Please check your Firebase credentials and internet connection.")
+            st.info("""
+            **Troubleshooting:**
+            1. Verify your Firebase credentials are correct
+            2. Ensure your service account has Firestore permissions
+            3. Check your internet connection
+            4. For Streamlit Cloud: Add credentials to App Settings > Secrets
+            """)
             return None
     return firestore.client()
 
 def get_db_client():
+    """Get Firestore database client"""
     db = init_firebase()
     if not db:
-        raise Exception("Firebase not initialized")
+        raise Exception("Firebase not initialized. Please configure Firebase credentials.")
     return db
 
 # ---------------- REGEX PATTERNS ----------------
@@ -502,53 +542,6 @@ AGENT_PROMPTS = {
     }
 }
 
-USER_PROMPT_TEMPLATE = """You will receive the topic text extracted from a textbook chapter.
-
-Return a STRUCTURED plan as compact JSON (no Markdown fences) with the keys below:
-
-{{
-  "title": string, 
-  "estimated_duration_min": integer,
-  "learning_objectives": [string, ...],
-  "prerequisites": [string, ...],
-  "key_vocabulary": [string, ...],
-  "materials_needed": [string, ...],
-  "engage_warmup": [{{"step": integer, "instruction": string}}],
-  "explicit_instruction": [{{"step": integer, "instruction": string}}],
-  "guided_practice": [{{"step": integer, "instruction": string}}],
-  "independent_practice": [{{"task": string, "success_criteria": [string, ...]}}],
-  "differentiation": {{
-      "support": [string, ...],
-      "challenge": [string, ...]
-  }},
-  "assessment": {{
-      "formative_checks": [string, ...],
-      "exit_ticket": string,
-      "rubric_points": [string, ...]
-  }},
-  "misconceptions_and_fixes": [string, ...],
-  "blackboard_notes": [string, ...],
-  "home_connection": [string, ...],
-  "teacher_tips": [string, ...]
-}}
-
-Constraints:
-- Keep it focused on THIS topic only.
-- If the text is mostly sight words/new words, tailor for phonics/recognition games.
-- If it's picture talk/time, emphasize observation, questioning, and speaking.
-- Keep steps actionable; avoid long paragraphs.
-- Produce VALID JSON only.
-
-CONTEXT:
-Class: {class_name}
-Subject: {subject}
-Chapter: {chapter}
-Topic title (from filename): {topic_title}
-
-TOPIC TEXT:
-\"\"\"{topic_text}\"\"\"
-"""
-
 # ---------------- AI AGENT FUNCTIONS ----------------
 def create_agent(agent_type: AgentType) -> MultigradeAIAgent:
     """Factory function to create AI agents"""
@@ -578,7 +571,17 @@ def generate_with_agent(agent_type: AgentType, context: TeachingContext, additio
         if result["success"]:
             # Try to parse JSON response
             try:
-                parsed_content = json.loads(result["content"])
+                # Remove markdown code blocks if present
+                content = result["content"].strip()
+                if content.startswith("```json"):
+                    content = content[7:]
+                if content.startswith("```"):
+                    content = content[3:]
+                if content.endswith("```"):
+                    content = content[:-3]
+                content = content.strip()
+                
+                parsed_content = json.loads(content)
                 return {
                     "success": True,
                     "content": parsed_content,
@@ -613,88 +616,6 @@ def safe_parse_json(s: str) -> Optional[Dict[str, Any]]:
             return json.loads(s2)
         except Exception:
             return None
-
-def plan_json_to_markdown(plan: Dict[str, Any]) -> str:
-    def bullets(items) -> str:
-        return "".join(f"- {it}\n" for it in items) if items else ""
-    out = []
-    out.append(f"# {plan.get('title', 'Teaching Plan')}")
-    out.append(f"**Estimated Duration:** {plan.get('estimated_duration_min', '-')} minutes\n")
-    out.append("## Learning Objectives")
-    out.append(bullets(plan.get("learning_objectives", [])))
-    out.append("## Prerequisites")
-    out.append(bullets(plan.get("prerequisites", [])))
-    out.append("## Key Vocabulary")
-    out.append(bullets(plan.get("key_vocabulary", [])))
-    out.append("## Materials Needed")
-    out.append(bullets(plan.get("materials_needed", [])))
-    out.append("## Engagement & Warmup")
-    for step in plan.get("engage_warmup", []):
-        if isinstance(step, dict):
-            out.append(f"- **Step {step.get('step', '')}:** {step.get('instruction', '')}")
-        else:
-            out.append(f"- {step}")
-    out.append("\n## Explicit Instruction")
-    for step in plan.get("explicit_instruction", []):
-        if isinstance(step, dict):
-            out.append(f"- **Step {step.get('step', '')}:** {step.get('instruction', '')}")
-        else:
-            out.append(f"- {step}")
-    out.append("\n## Guided Practice")
-    for step in plan.get("guided_practice", []):
-        if isinstance(step, dict):
-            out.append(f"- **Step {step.get('step', '')}:** {step.get('instruction', '')}")
-        else:
-            out.append(f"- {step}")
-    out.append("\n## Independent Practice")
-    for task in plan.get("independent_practice", []):
-        if isinstance(task, dict):
-            out.append(f"- **Task:** {task.get('task', '')}")
-            sc = task.get("success_criteria", [])
-            if sc:
-                out.append("  - **Success criteria:**")
-                out.extend([f"    - {c}" for c in sc])
-    out.append("\n## Differentiation")
-    diff = plan.get("differentiation", {})
-    out.append("### Support")
-    out.append(bullets(diff.get("support", [])))
-    out.append("### Challenge")
-    out.append(bullets(diff.get("challenge", [])))
-    out.append("## Assessment")
-    assess = plan.get("assessment", {})
-    out.append("### Formative Checks")
-    out.append(bullets(assess.get("formative_checks", [])))
-    out.append(f"### Exit Ticket\n{assess.get('exit_ticket', '')}\n")
-    out.append("### Rubric Points")
-    out.append(bullets(assess.get("rubric_points", [])))
-    out.append("## Common Misconceptions & Fixes")
-    out.append(bullets(plan.get("misconceptions_and_fixes", [])))
-    out.append("## Blackboard Notes")
-    out.append(bullets(plan.get("blackboard_notes", [])))
-    out.append("## Home Connection")
-    out.append(bullets(plan.get("home_connection", [])))
-    out.append("## Teacher Tips")
-    out.append(bullets(plan.get("teacher_tips", [])))
-    return "\n".join(out)
-
-def generate_teaching_plan(class_name: str, subject: str, chapter: str, topic_title: str, topic_text: str) -> Dict[str, Any]:
-    user_prompt = USER_PROMPT_TEMPLATE.format(
-        class_name=class_name,
-        subject=subject,
-        chapter=chapter,
-        topic_title=topic_title,
-        topic_text=topic_text[:12000]
-    )
-    raw = call_ollama_api(user_prompt)
-    plan = safe_parse_json(raw)
-    if not plan:
-        retry_prompt = user_prompt + "\n\nIMPORTANT: Return ONLY valid JSON format, no explanations or markdown."
-        raw = call_ollama_api(retry_prompt)
-        plan = safe_parse_json(raw)
-    if not plan:
-        raise ValueError("Model did not return valid JSON after retry. Raw response: " + raw[:500])
-    plan_md = plan_json_to_markdown(plan)
-    return {"plan_json": plan, "plan_markdown": plan_md}
 
 # ---------------- PDF PROCESSING ----------------
 def split_pdf_by_topics(pdf_file):
@@ -851,64 +772,56 @@ def get_content_by_subject_chapter(subject, chapter):
         st.error(f"Error fetching content: {e}")
         return None
 
-def save_teaching_plan(subject, chapter, topic_id, plan_data):
-    try:
-        db = get_db_client()
-        topic_ref = (db.collection("subjects").document(normalize_name(subject))
-                    .collection("chapters").document(normalize_name(chapter))
-                    .collection("topics").document(topic_id))
-        topic_ref.set({
-            "ai_plan_json": plan_data["plan_json"],
-            "ai_plan_markdown": plan_data["plan_markdown"],
-            "ai_model": f"ollama:{OLLAMA_MODEL}",
-            "ai_timestamp": firestore.SERVER_TIMESTAMP,
-        }, merge=True)
-        return True
-    except Exception as e:
-        st.error(f"Error saving plan: {e}")
-        st.error("Please check your Firebase connection and try again.")
-        return False
-
 # ---------------- STREAMLIT UI ----------------
 def main():
     st.title("🎓 Multigrade AI Teaching Assistant")
     st.markdown("**Comprehensive AI-powered teaching tools for grades 1-4 multigrade classrooms**")
     
-    # Initialize APIs
-    firebase_status = init_firebase()
-    
-    # Handle Gemini API setup with fallback option
-    gemini_status = init_gemini()
-    
-    if not gemini_status and not GEMINI_API_KEY:
-        st.warning("⚠️ Gemini API not configured via environment variable.")
+    # Initialize APIs with status display
+    with st.sidebar:
+        st.subheader("🔌 System Status")
         
-        with st.expander("🔧 Quick Setup - Enter API Key"):
-            st.markdown("**Temporary API Key Input** (for this session only)")
-            api_key_input = st.text_input(
-                "Enter your Gemini API Key:", 
-                type="password",
-                help="Get your API key from https://makersuite.google.com/app/apikey"
-            )
+        # Gemini API Status
+        gemini_status = init_gemini()
+        if gemini_status:
+            st.success("✅ Gemini API Connected")
+        else:
+            st.error("❌ Gemini API Not Connected")
+        
+        # Firebase Status
+        firebase_status = init_firebase()
+        if firebase_status:
+            st.success("✅ Firebase Connected")
+        else:
+            st.error("❌ Firebase Not Connected")
+        
+        st.divider()
+    
+    # Stop if Gemini is not configured
+    if not gemini_status:
+        st.warning("⚠️ Please configure Gemini API to use AI agents.")
+        with st.expander("📚 Configuration Guide"):
+            st.markdown("""
+            ### Setting up Streamlit Secrets
             
-            if api_key_input:
-                try:
-                    import os
-                    os.environ["GEMINI_API_KEY"] = api_key_input
-                    # Clear cache and retry
-                    st.cache_resource.clear()
-                    genai.configure(api_key=api_key_input)
-                    model = genai.GenerativeModel(GEMINI_MODEL)
-                    test_response = model.generate_content("Say 'API connection successful'")
-                    st.success("✅ API key validated! You can now use all AI agents.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Invalid API key: {e}")
-        
-        st.info("💡 **For permanent setup**, set the environment variable before running the app:")
-        st.code("export GEMINI_API_KEY='your_api_key_here'")
-        
-    if not gemini_status and not GEMINI_API_KEY:
+            **For Local Development:**
+            1. Create a file `.streamlit/secrets.toml` in your project directory
+            2. Add your API key:
+            ```toml
+            GEMINI_API_KEY = "your_api_key_here"
+            ```
+            
+            **For Streamlit Cloud Deployment:**
+            1. Go to your app's dashboard
+            2. Click on "⚙️ Settings" 
+            3. Go to "Secrets" section
+            4. Add:
+            ```toml
+            GEMINI_API_KEY = "your_api_key_here"
+            ```
+            
+            **Get your API key:** https://makersuite.google.com/app/apikey
+            """)
         st.stop()
     
     st.sidebar.title("🎯 AI Teaching Agents")
