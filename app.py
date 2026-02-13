@@ -28,7 +28,7 @@ try:
 except:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-GEMINI_MODEL = "gemini-2.0-pro"
+GEMINI_MODEL = "gemini-1.5-flash"
 MAX_TOKENS = 2048
 TEMPERATURE = 0.7
 
