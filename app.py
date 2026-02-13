@@ -805,7 +805,7 @@ def main():
     
     # Stop if Gemini is not configured
     if not gemini_status:
-        st.warning("⚠️ Please configure Gemini API to use AI agents.")
+        st.warning("⚠️ Please configure Olama to use AI agents.")
         with st.expander("📚 Configuration Guide"):
             st.markdown("""
             ### Setting up Streamlit Secrets
