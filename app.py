@@ -28,7 +28,13 @@ try:
 except:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-GEMINI_MODEL = "gemini-1.5-flash"
+# Gemini Model Selection
+# Choose based on your needs and API quota:
+GEMINI_MODEL = "gemini-1.5-flash"  # Fast and efficient model for general use
+# Alternative options:
+# GEMINI_MODEL = "gemini-1.5-pro"   # More capable, slower
+# GEMINI_MODEL = "gemini-pro"       # Legacy stable version
+
 MAX_TOKENS = 2048
 TEMPERATURE = 0.7
 
