@@ -93,7 +93,7 @@ GEMINI_API_KEY = "your_api_key_here"
         elif "quota" in error_msg.lower():
             st.warning("⚠️ API quota exceeded. Please check your usage limits.")
         else:
-            st.error(f"❌ Gemini API initialization failed: {e}")
+            st.error(f"❌ Olama initialization failed:")
         return False
 
 # ---------------- FIREBASE SETUP ----------------
