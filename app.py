@@ -29,7 +29,7 @@ except ImportError:
 st.set_page_config(page_title="Multigrade AI Teaching Assistant", layout="wide", page_icon="🎓")
 
 # ---------------- CONFIGURATION ----------------
-GEMINI_API_KEY = "AIzaSyA-qKWQmW0Boiwz8HG8P32lYN0KDtu4ISc"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.5-pro"
 MAX_TOKENS = 2048
 TEMPERATURE = 0.7
