@@ -87,7 +87,7 @@ GEMINI_API_KEY = "your_api_key_here"
     except Exception as e:
         error_msg = str(e)
         if "API_KEY_INVALID" in error_msg or "expired" in error_msg.lower():
-            st.error("❌ Invalid or expired Gemini API key.")
+            st.error("❌ Invalid or expired olama.")
             st.info("Please check your API key and generate a new one if needed:")
             st.info("🔗 https://makersuite.google.com/app/apikey")
         elif "quota" in error_msg.lower():
@@ -790,9 +790,9 @@ def main():
         # Gemini API Status
         gemini_status = init_gemini()
         if gemini_status:
-            st.success("✅ Gemini API Connected")
+            st.success("✅ Olama Connected")
         else:
-            st.error("❌ Gemini API Not Connected")
+            st.error("❌ Olama Not Connected")
         
         # Firebase Status
         firebase_status = init_firebase()
